@@ -116,15 +116,23 @@ jobs:
       # Build the image and load it into the local daemon so the test suite
       # can run inside it. Nothing is pushed yet: a build whose tests fail is
       # never published.
+      #
+      # Built from scratch every time, pulling the base image afresh. A cached
+      # "RUN apk add" layer never changes while the Dockerfile does not, so a
+      # cached build re-publishes the same packages indefinitely: the nightly
+      # rebuild saw outdated packages, rebuilt, and pushed an image identical
+      # to the last one. The fresh layers are still written to the cache, so
+      # the publish step below reuses exactly what was tested.
       - name: Build the image for testing
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           load: true
           push: false
+          pull: true
+          no-cache: true
           tags: ${{ env.TEST_IMAGE }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
           cache-to: type=gha,mode=max
 
       # tests/run-tests.sh runs tests/in-container.sh inside the image just
