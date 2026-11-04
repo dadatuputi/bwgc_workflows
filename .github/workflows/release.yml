@@ -1,0 +1,93 @@
+name: Release
+
+# Tags every merged pull request as a release, so the image repositories'
+# Dependabot can offer it as a pin bump. Nothing here runs in an image
+# repository: this workflow is not reusable.
+#
+# The version is the latest vX.Y.Z tag bumped by the pull request's label:
+#   release:major  a caller must change (new required input or permission)
+#   release:minor  a new optional input or capability
+#   release:none   no release (README or other non-workflow changes)
+#   (no label)     patch
+#
+# Run it by hand to release whatever is on master that has not been tagged.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to bump
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       !contains(github.event.pull_request.labels.*.name, 'release:none'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Work out the next version
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          BUMP_INPUT: ${{ inputs.bump }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = workflow_dispatch ]; then
+            BUMP="$BUMP_INPUT"
+          elif printf '%s' "$LABELS" | grep -q '"release:major"'; then
+            BUMP=major
+          elif printf '%s' "$LABELS" | grep -q '"release:minor"'; then
+            BUMP=minor
+          else
+            BUMP=patch
+          fi
+
+          HEAD=$(git rev-parse HEAD)
+          if git tag --points-at "$HEAD" | grep -q '^v[0-9]'; then
+            echo "master ($HEAD) is already tagged $(git tag --points-at "$HEAD" | head -1); nothing to release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          LAST=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+          LAST=${LAST:-v0.0.0}
+          IFS=. read -r MAJOR MINOR PATCH <<< "${LAST#v}"
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            *)     PATCH=$((PATCH + 1)) ;;
+          esac
+          NEXT="v$MAJOR.$MINOR.$PATCH"
+          echo "$LAST -> $NEXT ($BUMP) at $HEAD"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "sha=$HEAD" >> "$GITHUB_OUTPUT"
+
+      # Tags created with GITHUB_TOKEN start no other workflows, which is what
+      # we want: the image repositories pick the release up through Dependabot.
+      - name: Tag and publish the release
+        if: steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT: ${{ steps.version.outputs.next }}
+          SHA: ${{ steps.version.outputs.sha }}
+        run: gh release create "$NEXT" --target "$SHA" --title "$NEXT" --generate-notes
