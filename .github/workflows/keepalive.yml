@@ -1,0 +1,46 @@
+name: Keep scheduled workflows enabled
+
+# GitHub disables scheduled workflows in a public repository after 60 days
+# with no activity. Called from each image repository's rebuild-on-updates.yml
+# when nothing was rebuilt (a real build resets the clock on its own), this
+# pushes an empty commit only once the last commit is 50 days old: about
+# seven times a year during genuinely quiet stretches.
+#
+# The caller must grant contents: write.
+
+on:
+  workflow_call:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Commit only if the schedule is about to be disabled
+        run: |
+          set -euo pipefail
+          LAST=$(git log -1 --format=%ct)
+          AGE_DAYS=$(( ( $(date +%s) - LAST ) / 86400 ))
+          echo "Last repository commit was $AGE_DAYS days ago."
+
+          # GitHub disables scheduled workflows in public repositories after 60
+          # days without activity. Act at 50 to leave a margin for a run that
+          # fails or is skipped.
+          if [ "$AGE_DAYS" -lt 50 ]; then
+            echo "Nothing to do; the schedule is in no danger."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: keep scheduled workflows enabled
+
+          GitHub disables scheduled workflows in a public repository after 60
+          days with no activity. The last commit was $AGE_DAYS days ago, so this
+          empty commit resets that clock. No files are changed."
+          git push
