@@ -46,7 +46,16 @@ Callers pin a full commit SHA with the release tag as a comment, the same way th
 
 ## Releasing
 
-Tag releases `vMAJOR.MINOR.PATCH`. Bump MAJOR when a caller has to change: a new required input, a new permission, or a changed contract.
+Releases are automatic. `release.yml` tags every merged pull request `vMAJOR.MINOR.PATCH` and publishes a GitHub release with generated notes. The pull request's label picks the bump:
+
+| Label | Bump | Use for |
+| --- | --- | --- |
+| `release:major` | major | A caller has to change: a new required input, a new permission, or a changed contract |
+| `release:minor` | minor | A new optional input or capability |
+| (none) | patch | Fixes and anything else that changes a workflow |
+| `release:none` | no release | README or other changes that no caller runs |
+
+Running the workflow by hand releases whatever is on master that has not been tagged yet.
 
 ## Signatures
 
