@@ -31,6 +31,13 @@ on:
         description: Start a mailpit SMTP server for test suites that deliver mail
         type: boolean
         default: false
+      ref:
+        description: >-
+          A release tag (vX.Y.Z) to build instead of the triggering commit. The
+          scheduled rebuild passes the latest release here, so a security
+          rebuild republishes that release and never unreleased code.
+        type: string
+        default: ''
 
 env:
   REGISTRY: ghcr.io
@@ -81,6 +88,30 @@ jobs:
       # built from exactly the files the tests mount.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      # The release being built, if any: the ref input on a scheduled rebuild,
+      # or the pushed tag itself. Empty for a master or pull request build.
+      - name: Work out the release
+        id: release
+        env:
+          REF_INPUT: ${{ inputs.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -eu
+          if [ -n "$REF_INPUT" ]; then TAG=$REF_INPUT
+          elif [ "$REF_TYPE" = tag ]; then TAG=$REF_NAME
+          else TAG=""
+          fi
+          case "$TAG" in
+            ""|v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::$TAG is not a vX.Y.Z release tag"; exit 1 ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Release: ${TAG:-none}"
 
       # Static analysis before anything is built. The image ships no
       # shellcheck, so the suite cannot run it; the runner has it.
@@ -97,18 +128,30 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # The action's default tags, plus one tag per master build that never
-          # moves (master-20260923-031500, UTC). "master" is republished on every
+          # A master build publishes "master" plus a dated tag that never moves
+          # (master-20260923-031500, UTC). "master" is republished on every
           # rebuild; the dated tag keeps naming this exact build afterwards, so a
           # deployment can pin it, roll back to it, or check that an image it
           # pulled earlier is still the one published. A rebuild of the same
           # commit gets a new tag, which a commit-SHA tag would not.
+          #
+          # A release build (a pushed v1.4.2 tag, or a scheduled rebuild given
+          # ref: v1.4.2) publishes "1", "1.4", "1.4.2", "latest" and a dated
+          # 1.4.2-20261105-031500. Deployments follow the major tag, which only
+          # ever moves to a compatible release or a security rebuild of one.
+          # None of the master tags are touched, even though a scheduled run
+          # starts on master.
           tags: |
-            type=schedule
-            type=ref,event=branch
-            type=ref,event=tag
+            type=schedule,enable=${{ steps.release.outputs.tag == '' }}
+            type=ref,event=branch,enable=${{ steps.release.outputs.tag == '' }}
             type=ref,event=pr
-            type=raw,value={{branch}}-{{date 'YYYYMMDD-HHmmss'}},enable={{is_default_branch}}
+            type=raw,value={{branch}}-{{date 'YYYYMMDD-HHmmss'}},enable=${{ steps.release.outputs.tag == '' && '{{is_default_branch}}' || 'false' }}
+            type=semver,pattern={{version}},value=${{ steps.release.outputs.tag }},enable=${{ steps.release.outputs.tag != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release.outputs.tag }},enable=${{ steps.release.outputs.tag != '' }}
+            type=semver,pattern={{major}},value=${{ steps.release.outputs.tag }},enable=${{ steps.release.outputs.tag != '' }}
+            type=raw,value=${{ steps.release.outputs.version }}-{{date 'YYYYMMDD-HHmmss'}},enable=${{ steps.release.outputs.tag != '' }}
+          flavor: |
+            latest=${{ steps.release.outputs.tag != '' }}
 
       - name: Setup Docker buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
