@@ -20,6 +20,27 @@ Each image repository used to carry its own copy of these files, and the copies 
 | `test-image` | required | Local tag for the image under test, e.g. `bwgc_backup:test` |
 | `shellcheck` | `false` | Shellcheck `scripts/*.sh` at warning level first |
 | `mailpit` | `false` | Start a mailpit SMTP server and pass `BWGC_SMTP_HOST`, `BWGC_SMTP_PORT` and `BWGC_MAILPIT_API` to the tests |
+| `ref` | `''` | A release tag (`vX.Y.Z`) to build instead of the triggering commit. The scheduled rebuild passes the newest release here. |
+
+### `check-for-updates.yml` inputs and outputs
+
+| Name | Kind | Meaning |
+| --- | --- | --- |
+| `release` | input, default `false` | Check the newest `vX.Y.Z` release, as published under its version tag, instead of `master` |
+| `needs_build` | output | `'true'` when a rebuild is due |
+| `reason` | output | Why, in a few words |
+| `ref` | output | In release mode, the release tag that was checked; empty when the repository has no release |
+
+### Image tags
+
+| Build | Tags published |
+| --- | --- |
+| Push to master | `master`, `master-YYYYMMDD-HHmmss` |
+| Scheduled rebuild of master | `master`, `nightly`, `master-YYYYMMDD-HHmmss` |
+| Pushed release tag `v1.4.2`, or a rebuild given `ref: v1.4.2` | `1`, `1.4`, `1.4.2`, `latest`, `1.4.2-YYYYMMDD-HHmmss` |
+| Pull request | nothing is pushed |
+
+Deployments follow the major tag (`:1`). It moves only to a compatible release or to a security rebuild of one; a breaking change ships as `v2.0.0` and a deployment moves to `:2` on purpose. The dated tags never move, so any build can be pinned or rolled back to. Only the newest release is rebuilt, so once `v2.0.0` exists the `1` tags stop receiving security rebuilds.
 
 ## The contract with an image repository
 
@@ -32,7 +53,7 @@ Each image repository used to carry its own copy of these files, and the copies 
 ```yaml
 jobs:
   build:
-    uses: dadatuputi/bwgc_workflows/.github/workflows/build-image.yml@<sha> # v1.0.0
+    uses: dadatuputi/bwgc_workflows/.github/workflows/build-image.yml@<sha> # v1.1.0
     with:
       test-image: bwgc_example:test
     permissions:
@@ -41,6 +62,24 @@ jobs:
       id-token: write
       security-events: write
 ```
+
+A scheduled rebuild checks master and the newest release separately, and builds each one that is due:
+
+```yaml
+jobs:
+  check-release:
+    uses: dadatuputi/bwgc_workflows/.github/workflows/check-for-updates.yml@<sha> # v1.1.0
+    with:
+      release: true
+  build-release:
+    needs: check-release
+    if: needs.check-release.outputs.needs_build == 'true'
+    uses: ./.github/workflows/build-docker-image.yml
+    with:
+      ref: ${{ needs.check-release.outputs.ref }}
+```
+
+The repository's own `build-docker-image.yml` declares a `ref` input under `workflow_call` and passes it through to `build-image.yml`.
 
 Callers pin a full commit SHA with the release tag as a comment, the same way they pin third-party actions, and Dependabot's `github-actions` updates bump it on each new release. A change here therefore reaches an image only through a reviewed pull request in that image's repository.
 
