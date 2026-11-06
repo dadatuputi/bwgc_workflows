@@ -24,6 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Read only: the token is not left in .git/config. The issue step
+          # authenticates gh with GH_TOKEN instead.
+          persist-credentials: false
 
       - name: Resolve the pinned Alpine branch and its end-of-support date
         id: eol
@@ -115,6 +119,11 @@ jobs:
 
       - name: Fail the run when the branch has already expired
         if: steps.eol.outputs.state == 'expired'
+        # Through env rather than ${{ }} in the script: the date comes from
+        # alpinelinux.org, and an expression is pasted into the shell unquoted.
+        env:
+          BRANCH: ${{ steps.eol.outputs.branch }}
+          EOL: ${{ steps.eol.outputs.eol }}
         run: |
-          echo "::error::Alpine ${{ steps.eol.outputs.branch }} left support on ${{ steps.eol.outputs.eol }}"
+          echo "::error::Alpine $BRANCH left support on $EOL"
           exit 1

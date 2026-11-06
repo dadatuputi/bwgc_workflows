@@ -90,6 +90,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
+          # Nothing here pushes to git, so the token is not left in
+          # .git/config, where the build context and the test suite would
+          # otherwise have it within reach.
+          persist-credentials: false
 
       # The release being built, if any: the ref input on a scheduled rebuild,
       # or the pushed tag itself. Empty for a master or pull request build.
