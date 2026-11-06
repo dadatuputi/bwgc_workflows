@@ -113,6 +113,31 @@ jobs:
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "Release: ${TAG:-none}"
 
+          # The floating tags (1, 1.4, latest) move only to the newest release
+          # in their line. Without this, a rebuild of an older release, such as
+          # a nightly rebuild of v1.4.1 that started just before v1.4.2 was
+          # tagged, would move :1 and :latest back to v1.4.1, and the nightly
+          # check, which looks at :1.4.2, would never put them right.
+          FLOAT_MAJOR=true FLOAT_MINOR=true FLOAT_LATEST=true
+          if [ -n "$TAG" ]; then
+            if REMOTE=$(git ls-remote --tags --refs origin 'v*'); then
+              TAGS=$(printf '%s\n' "$REMOTE" | sed 's|.*refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
+              newest() { printf '%s\n' "$TAGS" | grep -E "$1" | sort -V | tail -n1; }
+              V=${TAG#v}
+              MAJOR=${V%%.*}
+              MINOR=$(printf '%s' "$V" | cut -d. -f2)
+              [ "$(newest '^v')" = "$TAG" ] || FLOAT_LATEST=false
+              [ "$(newest "^v$MAJOR\\.")" = "$TAG" ] || FLOAT_MAJOR=false
+              [ "$(newest "^v$MAJOR\\.$MINOR\\.")" = "$TAG" ] || FLOAT_MINOR=false
+            else
+              echo "::warning::Could not list the release tags; publishing every tag for $TAG"
+            fi
+          fi
+          echo "float_major=$FLOAT_MAJOR" >> "$GITHUB_OUTPUT"
+          echo "float_minor=$FLOAT_MINOR" >> "$GITHUB_OUTPUT"
+          echo "float_latest=$FLOAT_LATEST" >> "$GITHUB_OUTPUT"
+          [ -z "$TAG" ] || echo "Moves: major=$FLOAT_MAJOR minor=$FLOAT_MINOR latest=$FLOAT_LATEST"
+
       # Static analysis before anything is built. The image ships no
       # shellcheck, so the suite cannot run it; the runner has it.
       - name: Shellcheck the scripts
@@ -139,6 +164,8 @@ jobs:
           # ref: v1.4.2) publishes "1", "1.4", "1.4.2", "latest" and a dated
           # 1.4.2-20261105-031500. Deployments follow the major tag, which only
           # ever moves to a compatible release or a security rebuild of one.
+          # "1", "1.4" and "latest" are left alone when a newer release in
+          # their line exists (see "Work out the release").
           # None of the master tags are touched, even though a scheduled run
           # starts on master.
           tags: |
@@ -147,11 +174,11 @@ jobs:
             type=ref,event=pr
             type=raw,value={{branch}}-{{date 'YYYYMMDD-HHmmss'}},enable=${{ steps.release.outputs.tag == '' && '{{is_default_branch}}' || 'false' }}
             type=semver,pattern={{version}},value=${{ steps.release.outputs.tag }},enable=${{ steps.release.outputs.tag != '' }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release.outputs.tag }},enable=${{ steps.release.outputs.tag != '' }}
-            type=semver,pattern={{major}},value=${{ steps.release.outputs.tag }},enable=${{ steps.release.outputs.tag != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release.outputs.tag }},enable=${{ steps.release.outputs.tag != '' && steps.release.outputs.float_minor == 'true' }}
+            type=semver,pattern={{major}},value=${{ steps.release.outputs.tag }},enable=${{ steps.release.outputs.tag != '' && steps.release.outputs.float_major == 'true' }}
             type=raw,value=${{ steps.release.outputs.version }}-{{date 'YYYYMMDD-HHmmss'}},enable=${{ steps.release.outputs.tag != '' }}
           flavor: |
-            latest=${{ steps.release.outputs.tag != '' }}
+            latest=${{ steps.release.outputs.tag != '' && steps.release.outputs.float_latest == 'true' }}
 
       - name: Setup Docker buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
