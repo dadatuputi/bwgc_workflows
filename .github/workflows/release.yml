@@ -43,6 +43,8 @@ jobs:
         with:
           ref: master
           fetch-depth: 0
+          # git only reads tags here; gh creates the release with GH_TOKEN.
+          persist-credentials: false
 
       - name: Work out the next version
         id: version
