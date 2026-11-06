@@ -120,6 +120,20 @@ jobs:
             REASON="no published image yet"
           fi
 
+          if [ "$RELEASE" = true ] && [ -z "$REASON" ]; then
+            PUB_ID=$(docker image inspect "$PUBLISHED" --format '{{.Id}}' 2>/dev/null || true)
+            V=${REF#v}
+            for FLOAT in "${V%%.*}" "$(printf '%s' "$V" | cut -d. -f1,2)" latest; do
+              FLOAT_REF="ghcr.io/${GITHUB_REPOSITORY,,}:$FLOAT"
+              docker pull -q "$FLOAT_REF" >/dev/null 2>&1 || true
+              FLOAT_ID=$(docker image inspect "$FLOAT_REF" --format '{{.Id}}' 2>/dev/null || true)
+              if [ "$FLOAT_ID" != "$PUB_ID" ]; then
+                REASON=":$FLOAT is not on $REF"
+                break
+              fi
+            done
+          fi
+
           if [ -n "$REASON" ]; then
             echo "needs_build=true" >> "$GITHUB_OUTPUT"
             echo "reason=$REASON" >> "$GITHUB_OUTPUT"
