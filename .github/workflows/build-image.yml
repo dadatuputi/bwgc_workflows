@@ -113,11 +113,6 @@ jobs:
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "Release: ${TAG:-none}"
 
-          # The floating tags (1, 1.4, latest) move only to the newest release
-          # in their line. Without this, a rebuild of an older release, such as
-          # a nightly rebuild of v1.4.1 that started just before v1.4.2 was
-          # tagged, would move :1 and :latest back to v1.4.1, and the nightly
-          # check, which looks at :1.4.2, would never put them right.
           FLOAT_MAJOR=true FLOAT_MINOR=true FLOAT_LATEST=true
           if [ -n "$TAG" ]; then
             if REMOTE=$(git ls-remote --tags --refs origin 'v*'); then
@@ -164,8 +159,6 @@ jobs:
           # ref: v1.4.2) publishes "1", "1.4", "1.4.2", "latest" and a dated
           # 1.4.2-20261105-031500. Deployments follow the major tag, which only
           # ever moves to a compatible release or a security rebuild of one.
-          # "1", "1.4" and "latest" are left alone when a newer release in
-          # their line exists (see "Work out the release").
           # None of the master tags are touched, even though a scheduled run
           # starts on master.
           tags: |
