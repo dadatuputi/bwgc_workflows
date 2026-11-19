@@ -202,6 +202,15 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-to: type=gha,mode=max
 
+      # ubuntu-26.04 runners no longer load legacy xtables on demand, and a
+      # container cannot load modules itself. Load them here so suites that
+      # exercise iptables-legacy (bwgc_countryblock) still cover it. Harmless
+      # for suites that do not touch iptables.
+      - name: Load the legacy iptables modules
+        run: |
+          sudo modprobe -a ip_tables iptable_filter \
+            || echo "::warning::legacy iptables modules unavailable; iptables-legacy tests will be skipped"
+
       # tests/run-tests.sh runs tests/in-container.sh inside the image just
       # built; BWGC_IMAGE tells it to use that image rather than build its own.
       - name: Run the test suite
