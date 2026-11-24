@@ -202,6 +202,12 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-to: type=gha,mode=max
 
+      # Newer runner kernels don't autoload legacy xtables, and containers can't.
+      - name: Load the legacy iptables modules
+        run: |
+          sudo modprobe -a ip_tables iptable_filter \
+            || echo "::warning::legacy iptables modules unavailable; iptables-legacy tests will be skipped"
+
       # tests/run-tests.sh runs tests/in-container.sh inside the image just
       # built; BWGC_IMAGE tells it to use that image rather than build its own.
       - name: Run the test suite
