@@ -13,7 +13,7 @@ name: Release
 # Run it by hand to release whatever is on master that has not been tagged.
 
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
     branches: [master]
   workflow_dispatch:
