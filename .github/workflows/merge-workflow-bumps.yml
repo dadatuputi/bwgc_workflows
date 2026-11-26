@@ -1,0 +1,62 @@
+name: Merge bwgc_workflows bumps
+
+# Merges a Dependabot pull request once its checks pass, if all it changes is
+# bwgc_workflows pins. The caller must grant contents: write,
+# pull-requests: write and checks: read.
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        type: number
+        required: true
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+    steps:
+      - name: Merge if it only bumps bwgc_workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ inputs.pr-number }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          read -r AUTHOR STATE SHA < <(gh api "repos/$REPO/pulls/$PR" --jq '[.user.login, .state, .head.sha] | @tsv')
+          if [ "$AUTHOR" != "dependabot[bot]" ] || [ "$STATE" != open ]; then
+            echo "#$PR is $STATE and by $AUTHOR; leaving it alone."
+            exit 0
+          fi
+
+          gh api "repos/$REPO/pulls/$PR/files?per_page=100" > files.json
+          if jq -e '.[] | select((.filename | startswith(".github/workflows/") | not) or .patch == null)' files.json >/dev/null; then
+            echo "#$PR changes files outside .github/workflows; leaving it for review."
+            exit 0
+          fi
+          PIN='^[+-][[:space:]]*(- )?uses: dadatuputi/bwgc_workflows/\.github/workflows/[A-Za-z0-9._-]+@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$'
+          OTHER=$(jq -r '.[].patch' files.json | grep -E '^[+-]' | grep -vE "$PIN" || true)
+          if [ -n "$OTHER" ]; then
+            printf '#%s changes more than bwgc_workflows pins; leaving it for review:\n%s\n' "$PR" "$OTHER"
+            exit 0
+          fi
+
+          for _ in $(seq 60); do
+            gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
+              --jq "[.check_runs[] | select(.html_url | contains(\"/runs/$RUN_ID/\") | not)]" > checks.json
+            if jq -e 'length > 0 and all(.status == "completed")' checks.json >/dev/null; then
+              break
+            fi
+            sleep 30
+          done
+          jq -r '.[] | "\(.name): \(.status) \(.conclusion)"' checks.json
+          if ! jq -e 'all(.status == "completed" and (.conclusion | IN("success", "skipped", "neutral")))' checks.json >/dev/null; then
+            echo "::error::Checks on #$PR did not all pass; not merging."
+            exit 1
+          fi
+
+          gh api -X PUT "repos/$REPO/pulls/$PR/merge" -f merge_method=squash -f sha="$SHA"
